@@ -8,7 +8,7 @@ import type { Prompter } from './prompt.ts';
 type Print = (line: string) => void;
 
 const TOKEN_HELP = `Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens
-A token with scopes needs read:jira-user and read:jira-work.
+A token with scopes needs read:jira-user, read:jira-work and write:jira-work.
 The token is stored in the OS keychain, never in a file.`;
 
 /** Guided first-time setup: connection, token, one allowed project. Replaces any existing setup. */
@@ -106,9 +106,12 @@ export async function findProject(client: JiraClient, input: string) {
   return client.getProject(key);
 }
 
+/** What a project grant allows, as the CLI shows it. */
+export const GRANT_ACCESS = 'read, create, update own';
+
 export function describeConfig(config: Config): string {
   const projects = config.projects.length
-    ? config.projects.map((project) => `  ${project.key.padEnd(12)} read`).join('\n')
+    ? config.projects.map((project) => `  ${project.key.padEnd(12)} ${GRANT_ACCESS}`).join('\n')
     : '  (none; every call is denied)';
   return `Site:     ${config.site}\nAccount:  ${config.email}\nProjects:\n${projects}`;
 }

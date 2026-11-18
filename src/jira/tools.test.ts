@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { FAKE_EMAIL, FAKE_TOKEN } from '../../test/fake-jira.ts';
-import { callTool, DEMO_READ, setup } from '../../test/harness.ts';
+import { callTool, DEMO_GRANT, setup } from '../../test/harness.ts';
 import { createJiraClient } from './client.ts';
 import { GetIssueInput, getIssue, scopeJql, searchIssues, SearchInput } from './tools.ts';
 
 describe('searchIssues', () => {
   it('drops results from other projects even when the JQL escapes its scope', async () => {
-    const { jira, context } = setup([DEMO_READ]);
+    const { jira, context } = setup([DEMO_GRANT]);
     const result = await searchIssues(
       context,
       SearchInput.parse({ jql: 'x) OR (project = SECRET' }),
@@ -18,7 +18,7 @@ describe('searchIssues', () => {
   });
 
   it('fails closed when a search result has no project', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const malformed = createJiraClient({
       apiBaseUrl: context.config.apiBaseUrl,
       email: FAKE_EMAIL,
@@ -59,13 +59,13 @@ describe('scopeJql', () => {
 
 describe('getIssue', () => {
   it('reads an issue in an allowed project', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const issue = await getIssue(context, GetIssueInput.parse({ issue: 'demo-1' }));
     expect(issue).toMatchObject({ key: 'DEMO-1', project: 'DEMO', description: 'Body of DEMO-1' });
   });
 
   it('denies issues in other projects, including keys that look allowed', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     await expect(getIssue(context, GetIssueInput.parse({ issue: 'SECRET-1' }))).rejects.toThrow(
       /not found in a project/,
     );
@@ -75,7 +75,7 @@ describe('getIssue', () => {
   });
 
   it('answers missing and forbidden issues alike', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const missing = getIssue(context, GetIssueInput.parse({ issue: 'DEMO-999' }));
     await expect(missing).rejects.toThrow(
       'Issue DEMO-999 was not found in a project this server may read. Allowed: DEMO.',
@@ -83,14 +83,14 @@ describe('getIssue', () => {
   });
 
   it('fails closed on a malformed Jira response', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     await expect(getIssue(context, GetIssueInput.parse({ issue: 'DEMO-3' }))).rejects.toThrow(
       /unexpected format/,
     );
   });
 
   it('never repeats credentials that Jira echoes in an error', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const error: unknown = await getIssue(context, GetIssueInput.parse({ issue: 'DEMO-4' })).catch(
       (e: unknown) => e,
     );
@@ -101,7 +101,7 @@ describe('getIssue', () => {
   });
 
   it('redacts a long error before shortening it, so no part of the token survives', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const token = 'plain-classic-token-without-a-known-shape';
     const echoing = createJiraClient({
       apiBaseUrl: context.config.apiBaseUrl,
@@ -118,7 +118,7 @@ describe('getIssue', () => {
   });
 
   it('redacts the token from successful responses before they reach tool output', async () => {
-    const { jira, context } = setup([DEMO_READ]);
+    const { jira, context } = setup([DEMO_GRANT]);
     const echoing = createJiraClient({
       apiBaseUrl: context.config.apiBaseUrl,
       email: FAKE_EMAIL,
@@ -136,7 +136,7 @@ describe('getIssue', () => {
   });
 
   it('redacts tokens hidden behind JSON escapes, in results and in errors', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const token = 'plain-classic-token-without-a-known-shape';
     const escaped = `\\u${token.charCodeAt(0).toString(16).padStart(4, '0')}${token.slice(1)}`;
     const client = (status: number, body: string) =>
@@ -160,7 +160,7 @@ describe('getIssue', () => {
   it('redacts a token split across rich-text nodes in tool output', async () => {
     const shaped = `ATATT3xFfGF0QQQQ${'a1B2'.repeat(12)}`;
     for (const token of [FAKE_TOKEN, shaped]) {
-      const { context } = setup([DEMO_READ]);
+      const { context } = setup([DEMO_GRANT]);
       // Formatting splits text into nodes; the first holds a token-shaped head on its own.
       const doc = {
         type: 'doc',

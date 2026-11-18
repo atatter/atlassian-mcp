@@ -1,12 +1,12 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { EXCLUDED, FAKE_EMAIL, FAKE_TOKEN } from '../../test/fake-jira.ts';
-import { callTool, DEMO_READ, setup } from '../../test/harness.ts';
+import { callTool, DEMO_GRANT, setup } from '../../test/harness.ts';
 import { createJiraClient } from './client.ts';
 import { GetIssueInput, getIssue } from './tools.ts';
 
 describe('jira_get_issue fields', () => {
   it("answers what an issue's parent is, by key and link only", async () => {
-    const { jira, context } = setup([DEMO_READ]);
+    const { jira, context } = setup([DEMO_GRANT]);
     const output = await callTool(context, 'jira_get_issue', { issue: 'DEMO-1' });
     const answer = JSON.parse(output);
     expect(answer.parent).toEqual({
@@ -30,9 +30,10 @@ describe('jira_get_issue fields', () => {
   });
 
   it("lists the issue's other fields and returns the ones asked for", async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const first = JSON.parse(await callTool(context, 'jira_get_issue', { issue: 'DEMO-1' }));
     expect(first.fields).toBeUndefined();
+    expect(first.creator).toBe('Synthetic Person');
     expect(first.otherFields).toEqual([
       { id: 'customfield_10016', name: 'Story Points' },
       { id: 'customfield_10020', name: 'Sprint' },
@@ -84,7 +85,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('keeps the requested fields typed', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const input = GetIssueInput.parse({ issue: 'DEMO-1', fields: ['customfield_10016'] });
     const answer = await getIssue(context, input);
     expectTypeOf(answer.fields).not.toBeAny();
@@ -92,7 +93,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('checks the resolved project before reading any requested field', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const output = await callTool(context, 'jira_get_issue', {
       issue: 'DEMO-2',
       fields: ['summary', 'customfield_10016'],
@@ -103,7 +104,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('redacts a token held in a custom field or its name', async () => {
-    const { jira, context } = setup([DEMO_READ]);
+    const { jira, context } = setup([DEMO_GRANT]);
     const client = createJiraClient({
       apiBaseUrl: context.config.apiBaseUrl,
       email: FAKE_EMAIL,
@@ -125,7 +126,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('redacts a token split across rich text before cutting a long field short', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const token = 'plain-classic-token-without-a-known-shape';
     const text = (value: string) => ({ type: 'text', text: value });
     // Cut at 2000 characters before redaction, this would keep the token's first 15 characters.
@@ -157,7 +158,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('bounds links and subtasks, and says so', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const ref = (index: number) => ({ key: `DEMO-${index + 100}`, fields: { summary: EXCLUDED } });
     const issuelinks = Array.from({ length: 60 }, (_, index) => ({
       type: { inward: 'in', outward: 'out' },
@@ -188,7 +189,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it("returns the same redacted text it measured, so redaction can't lift the length cap", async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     // A typed backslash-n before a third party's Basic credential with a long tail glued on: masked
     // when measured as a field, but not once serialized, where JSON doubles the backslash.
     const credential = Buffer.from('someone@example.invalid:not-our-toke').toString('base64');
@@ -214,7 +215,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('answers that an issue has no parent', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const issue = {
       id: '20007',
       key: 'DEMO-7',
@@ -240,7 +241,7 @@ describe('jira_get_issue fields', () => {
   });
 
   it('shows only the parent key in search results', async () => {
-    const { context } = setup([DEMO_READ]);
+    const { context } = setup([DEMO_GRANT]);
     const output = await callTool(context, 'jira_search_issues', {});
     expect(JSON.parse(output).issues).toMatchObject([{ key: 'DEMO-1', parent: 'SECRET-9' }]);
     expect(output).not.toContain(EXCLUDED);

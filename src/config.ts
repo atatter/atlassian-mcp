@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import * as z from 'zod';
 
 /**
- * Read access to one project. Policy matches on the immutable project ID; the key is for display
- * and for `deny <KEY>`. Settings written by earlier versions may carry an `access` field, which is
- * ignored.
+ * Access to one project: read its issues, create issues, and change issues the user created.
+ * Policy matches on the immutable project ID; the key is for display and for `deny <KEY>`.
+ * Settings written by earlier versions may carry an `access` field, which is ignored.
  */
 const ProjectGrant = z.object({
   id: z.string().regex(/^\d+$/),

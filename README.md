@@ -1,17 +1,25 @@
 # atlassian-mcp
 
-A local [MCP](https://modelcontextprotocol.io) server that gives coding agents read-only access to Jira Cloud. You choose which projects an agent may read; everything else is denied. The API token stays in the OS keychain.
+A local [MCP](https://modelcontextprotocol.io) server that gives coding agents access to Jira Cloud. You choose which projects an agent may read, create issues in, and update your own issues in. The API token stays in the OS keychain.
 
-Status: proof of concept, not released. There is no npm package yet, so this README is for developers running it from a checkout. Jira Cloud only, tested on macOS. Confluence, Bitbucket and Data Center are planned.
+Status: unreleased proof of concept with read and write tools. There is no npm package yet, so this README is for developers running it from a checkout. Jira Cloud only, tested on macOS. Confluence, Bitbucket and Data Center are planned.
 
 ## Tools
 
 | Tool | Does |
 | --- | --- |
-| `jira_search_issues` | Search with JQL; returns a compact list per issue |
-| `jira_get_issue` | Read an issue: details, description, parent, links, subtasks, latest comments, and any other fields you ask for |
+| `jira_search_issues` | Search with JQL and get a compact result per issue |
+| `jira_get_issue` | Read issue details, including the creator's display name when available, description, parent, links, subtasks, latest comments, and any other fields you ask for |
+| `jira_create_issue` | Create an issue in an allowed project |
+| `jira_update_issue` | Update an issue you created in an allowed project |
 
-Both only read. No tool writes to Jira or changes permissions.
+Use `jira_create_issue` with a project key, issue type name, and summary. You can also supply a description, labels, a priority name, an assignee, and a parent issue key.
+
+Use `jira_update_issue` with an issue key and any of summary, description, labels, priority name, assignee, status, or comment. Supplied fields replace their current values. Jira must offer a workflow transition to the requested status if the issue is in a different status. A comment is added as a new comment.
+
+For either write tool, use `"me"` to assign the issue to the token owner, an Atlassian account ID to assign it to someone else, or `null` to unassign it.
+
+Descriptions and comments accept Markdown. Jira renders paragraphs, headings, bullet and numbered lists with nesting, fenced code blocks, links using `http`, `https`, or `mailto`, bold, italic, and inline code. Unsupported syntax stays as literal text.
 
 `jira_get_issue` lists the issue's other fields whose values it can show in `otherFields`, by ID and name. Ask for their values with `fields`:
 
@@ -23,7 +31,9 @@ Values come back as readable text, numbers or lists. An empty, unknown or shorte
 
 ## Permissions
 
-Read access is granted per Jira project. The server checks every call against the project Jira reports for each issue, so issue key prefixes, crafted JQL and tool annotations can't widen access. Permission changes made with the CLI apply to running servers on their next call.
+A single `allow <KEY>` grant lets the agent read and create issues in that project and update issues you created there. The server allows updates only when Jira's immutable creator field identifies the token owner. If Jira omits the creator, the server refuses the update.
+
+A parent supplied on create must also belong to an allowed project. The server checks the project Jira reports, so issue key prefixes, crafted JQL, and tool annotations can't widen access. There are no delete tools, and the server sends no DELETE requests. Permission changes made with the CLI apply to running servers on their next call.
 
 ## Run it from a checkout
 
@@ -39,7 +49,7 @@ node dist/cli.js setup
 
 Setup asks for your Jira site, account email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) (typed hidden), checks the connection, lets you pick a project to allow, and shows a summary before saving. It ends by printing the commands that register the server with Claude Code, Codex or any MCP client. They run this checkout's `dist/cli.js` with the Node.js that ran setup, and the client starts the server when it needs it. After changing the code, run `pnpm build`; a client picks up the new build the next time it starts the server.
 
-API tokens with scopes need `read:jira-user` and `read:jira-work`. Tokens without scopes work too, but they carry everything your account can do; a token with only these two scopes is limited to reading.
+Setup lists the required scopes for a scoped API token. They are `read:jira-user`, `read:jira-work`, and `write:jira-work`. Tokens without scopes also work and carry everything your account can do.
 
 ## Commands
 
@@ -48,7 +58,7 @@ Run them from the checkout after `pnpm build`:
 ```
 node dist/cli.js setup           Connect to Jira Cloud and allow a first project
 node dist/cli.js status          Show the setup and check the connection
-node dist/cli.js allow <KEY>     Allow reading a project
+node dist/cli.js allow <KEY>     Allow reading, creating, and updating your own issues
 node dist/cli.js deny <KEY>      Remove a project's access
 node dist/cli.js token           Replace the stored API token
 node dist/cli.js client-config   Print the MCP client configuration
@@ -56,11 +66,17 @@ node dist/cli.js reset           Delete the stored token and settings
 node dist/cli.js serve           Run the MCP server over stdio (MCP clients start this)
 ```
 
+`allow`, `status`, and `setup` show grants as "read, create, update own".
+
 Settings live in `~/.config/atlassian-mcp/config.json` (or `$XDG_CONFIG_HOME/atlassian-mcp`). They hold the site, email and allowed projects, never the token.
 
 ## What this does not protect against
 
-The limits apply to what an agent can do through this server. Any program running as your user can still run the CLI, change the settings or read the keychain entry. Run untrusted agents in a sandbox that can't do those things. Jira issue text is written by other people, so treat it as untrusted input to your agent.
+The limits apply to what an agent can do through this server. Any program running as your user can still run the CLI, change the settings or read the keychain entry. Run untrusted agents in a sandbox that can't do those things.
+
+The server checks the issue's project before writing. If someone moves the issue to a denied project between the check and the write, the write can land there if the token has permission in that project. Jira offers no conditional write for this check.
+
+Treat Jira issue text as untrusted input. An agent can write anything it reads into issues in allowed projects, including text from a prompt injection.
 
 ## Development
 

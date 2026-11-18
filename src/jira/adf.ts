@@ -11,6 +11,19 @@ export const AdfNode = z.object({
 });
 export type AdfNode = z.infer<typeof AdfNode>;
 
+// The ADF this package writes, from Markdown in markdown.ts. Jira Cloud REST v3 takes it for
+// descriptions and comments; https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
+export type Mark = { type: 'strong' | 'em' | 'code' } | { type: 'link'; attrs: { href: string } };
+export type Inline = { type: 'text'; text: string; marks?: Mark[] } | { type: 'hardBreak' };
+export type Block =
+  | { type: 'paragraph'; content: Inline[] }
+  | { type: 'heading'; attrs: { level: number }; content: Inline[] }
+  | { type: 'codeBlock'; attrs?: { language: string }; content?: { type: 'text'; text: string }[] }
+  | { type: 'bulletList'; content: ListItem[] }
+  | { type: 'orderedList'; attrs?: { order: number }; content: ListItem[] };
+export type ListItem = { type: 'listItem'; content: Block[] };
+export type AdfDoc = { type: 'doc'; version: 1; content: Block[] };
+
 /** Flattens ADF to plain text. Formatting is dropped; block nodes end with a newline. */
 export function adfToText(node: AdfNode): string {
   switch (node.type) {

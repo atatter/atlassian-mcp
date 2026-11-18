@@ -10,11 +10,18 @@ const project = (id: string, key: string) => ({ id, key, name: `${key} project` 
 const DEMO = project('10000', 'DEMO');
 const SECRET = project('10001', 'SECRET');
 
-const issue = (id: string, key: string, inProject: typeof DEMO) => ({
+/** The account the fake answers `myself` with. */
+const ME = 'synthetic';
+
+/** An issue in a project. A null creator leaves the field out, as Jira can. */
+const issue = (id: string, key: string, inProject: typeof DEMO, creator: string | null = ME) => ({
   id,
   key,
   fields: {
     project: { id: inProject.id, key: inProject.key },
+    ...(creator === null
+      ? {}
+      : { creator: { accountId: creator, displayName: 'Synthetic Person' } }),
     summary: `Summary of ${key}`,
     status: { name: 'To Do' },
     issuetype: { name: 'Task' },
@@ -85,6 +92,7 @@ const demo1 = {
   names: {
     project: 'Project',
     summary: 'Summary',
+    creator: 'Creator',
     parent: 'Parent',
     issuelinks: 'Linked Issues',
     subtasks: 'Sub-tasks',
@@ -109,12 +117,28 @@ const ISSUES = {
 
 /** Endpoints that always answer the same way. */
 const FIXED: Record<string, unknown> = {
-  '/rest/api/3/myself': { accountId: 'synthetic', displayName: 'Synthetic User' },
+  '/rest/api/3/myself': { accountId: ME, displayName: 'Synthetic User' },
+  '/rest/api/3/issue/createmeta/10000/issuetypes': {
+    issueTypes: [
+      { id: '10001', name: 'Task' },
+      { id: '10002', name: 'Bug' },
+    ],
+  },
+  '/rest/api/3/issue/20001/transitions': {
+    transitions: [
+      { id: '11', name: 'Start work', to: { name: 'In Progress' } },
+      { id: '31', name: 'Finish', to: { name: 'Done' } },
+    ],
+  },
   '/rest/api/3/project/search': { values: [DEMO, SECRET], isLast: true },
   '/rest/api/3/project/DEMO': DEMO,
   '/rest/api/3/project/SECRET': SECRET,
   // Malformed: the issue has no project, so it can't be checked.
   '/rest/api/3/issue/DEMO-3': { id: '20004', key: 'DEMO-3', fields: {} },
+  // Readable, but created by another account, so it may not be changed.
+  '/rest/api/3/issue/DEMO-7': issue('20007', 'DEMO-7', DEMO, 'someone-else'),
+  // Readable, but Jira gave no creator, so ownership can't be proven.
+  '/rest/api/3/issue/DEMO-9': issue('20010', 'DEMO-9', DEMO, null),
 };
 
 /**
@@ -123,6 +147,8 @@ const FIXED: Record<string, unknown> = {
  */
 export function createFakeJira() {
   const searches: string[] = [];
+  // Every write the fake accepted, as "METHOD /path" with its parsed body.
+  const writes: { request: string; body: unknown }[] = [];
   // Every request as "METHOD /path?query", to prove what was and wasn't asked of Jira.
   const requests: string[] = [];
   const expectedAuth = `Basic ${Buffer.from(`${FAKE_EMAIL}:${FAKE_TOKEN}`).toString('base64')}`;
@@ -134,12 +160,21 @@ export function createFakeJira() {
       return Response.json({ errorMessages: ['Unauthorized'] }, { status: 401 });
     }
 
-    if (Object.hasOwn(FIXED, pathname)) {
-      return Response.json(FIXED[pathname]);
-    }
     if (pathname === '/rest/api/3/search/jql' && request.method === 'POST') {
       searches.push(z.object({ jql: z.string() }).parse(await request.json()).jql);
       return Response.json({ issues: Object.values(ISSUES), isLast: true });
+    }
+    // Only the writes the tools make are answered; any other method, DELETE included, fails.
+    if (request.method !== 'GET') {
+      const answer = writeAnswer(request.method, pathname);
+      if (answer) {
+        writes.push({ request: `${request.method} ${pathname}`, body: await request.json() });
+        return answer;
+      }
+      return Response.json({ errorMessages: ['Method not allowed.'] }, { status: 405 });
+    }
+    if (Object.hasOwn(FIXED, pathname)) {
+      return Response.json(FIXED[pathname]);
     }
     // An upstream error that echoes the credentials back.
     if (pathname === '/rest/api/3/issue/DEMO-4') {
@@ -168,7 +203,28 @@ export function createFakeJira() {
   const fetch = (input: string | URL | Request, init?: RequestInit) =>
     handle(new Request(input, init));
 
-  return { handle, fetch, searches, requests };
+  return { handle, fetch, searches, requests, writes };
+}
+
+/** What Jira answers a successful create, edit, transition or comment with. */
+function writeAnswer(method: string, pathname: string): Response | undefined {
+  if (method === 'POST' && pathname === '/rest/api/3/issue') {
+    return Response.json(
+      { id: '20100', key: 'DEMO-100', self: 'https://example.invalid' },
+      { status: 201 },
+    );
+  }
+  if (method === 'PUT' && /^\/rest\/api\/3\/issue\/\d+$/.test(pathname)) {
+    return new Response(null, { status: 204 });
+  }
+  if (method === 'POST' && /^\/rest\/api\/3\/issue\/\d+\/transitions$/.test(pathname)) {
+    return new Response(null, { status: 204 });
+  }
+  if (method === 'POST' && /^\/rest\/api\/3\/issue\/\d+\/comment$/.test(pathname)) {
+    return Response.json({ id: '30001' }, { status: 201 });
+  }
+
+  return undefined;
 }
 
 /** Serves the fake over HTTP on a random loopback port, for tests that run the built CLI. */

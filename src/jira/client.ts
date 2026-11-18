@@ -1,7 +1,7 @@
 import * as z from 'zod';
 import type { Config } from '../config.ts';
 import { maskSecrets, redact, tokenEntry } from '../credentials.ts';
-import { AdfNode } from './adf.ts';
+import { type AdfDoc, AdfNode } from './adf.ts';
 
 /** A failed Jira call. Messages are already redacted and safe to show to the model. */
 export class JiraError extends Error {
@@ -39,6 +39,8 @@ const Issue = z.object({
     priority: Named.nullish(),
     assignee: Person.nullish(),
     reporter: Person.nullish(),
+    /** Set by Jira when the issue is created and never editable, unlike the reporter. */
+    creator: z.object({ accountId: z.string(), displayName: z.string().optional() }).nullish(),
     labels: z.array(z.string()).optional(),
     parent: IssueRef.nullish(),
     subtasks: z.array(IssueRef).optional(),
@@ -85,6 +87,18 @@ const IssueWithAllFields = z.object({
 const SearchResult = z.object({ issues: z.array(Issue), nextPageToken: z.string().optional() });
 const Myself = z.object({ accountId: z.string(), displayName: z.string() });
 const ProjectPage = z.object({ values: z.array(Project) });
+const IssueType = z.object({ id: z.string(), name: z.string() });
+/** Jira's spec documents either list for this page; a page with neither is unexpected. */
+const IssueTypePage = z.union([
+  z.object({ issueTypes: z.array(IssueType) }),
+  z.object({ createMetaIssueType: z.array(IssueType) }),
+]);
+const Created = z.object({ id: z.string().regex(/^\d+$/), key: z.string() });
+const Transitions = z.object({
+  transitions: z.array(z.object({ id: z.string(), name: z.string(), to: Named })),
+});
+/** Edits and transitions answer 204 with no body; nothing in a write's answer is used. */
+const NoContent = z.unknown();
 const ErrorBody = z.object({
   errorMessages: z.array(z.string()).optional(),
   errors: z.record(z.string(), z.string()).optional(),
@@ -101,8 +115,25 @@ const SUMMARY_FIELDS = [
   'updated',
 ];
 
+/** The fields this package writes, in the shape Jira's create and edit endpoints take. */
+export type IssueFields = {
+  summary?: string;
+  description?: AdfDoc;
+  labels?: string[];
+  priority?: { name: string };
+  /** null unassigns. */
+  assignee?: { accountId: string } | null;
+};
+type Ref = { id: string };
+type NewIssueFields = IssueFields & { project: Ref; issuetype: Ref; parent?: Ref; summary: string };
+
 type ClientOptions = { apiBaseUrl: string; email: string; token: string; fetch?: typeof fetch };
-type RequestOptions = { method?: 'GET' | 'POST'; query?: Record<string, string>; body?: unknown };
+/** No DELETE: nothing this package does removes data from Jira. */
+type RequestOptions = {
+  method?: 'GET' | 'POST' | 'PUT';
+  query?: Record<string, string>;
+  body?: unknown;
+};
 
 export type JiraClient = ReturnType<typeof createJiraClient>;
 
@@ -216,6 +247,34 @@ export function createJiraClient({
 
       return { ...issue.data, values: all.fields, names: all.names ?? {} };
     },
+    issueTypes: async (projectId: string) => {
+      const page = await request(
+        IssueTypePage,
+        `/rest/api/3/issue/createmeta/${encodeURIComponent(projectId)}/issuetypes`,
+        { query: { maxResults: '100' } },
+      );
+      return 'issueTypes' in page ? page.issueTypes : page.createMetaIssueType;
+    },
+    createIssue: (fields: NewIssueFields) =>
+      request(Created, '/rest/api/3/issue', { method: 'POST', body: { fields } }),
+    editIssue: (issueId: string, fields: IssueFields) =>
+      request(NoContent, `/rest/api/3/issue/${encodeURIComponent(issueId)}`, {
+        method: 'PUT',
+        body: { fields },
+      }),
+    transitions: async (issueId: string) =>
+      (await request(Transitions, `/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`))
+        .transitions,
+    transition: (issueId: string, transitionId: string) =>
+      request(NoContent, `/rest/api/3/issue/${encodeURIComponent(issueId)}/transitions`, {
+        method: 'POST',
+        body: { transition: { id: transitionId } },
+      }),
+    addComment: (issueId: string, body: AdfDoc) =>
+      request(NoContent, `/rest/api/3/issue/${encodeURIComponent(issueId)}/comment`, {
+        method: 'POST',
+        body: { body },
+      }),
   };
 }
 

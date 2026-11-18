@@ -92,7 +92,7 @@ describe('built CLI and stdio server', () => {
     },
   );
 
-  it('starts over stdio and lists the three Jira tools', async () => {
+  it('starts over stdio and lists the four Jira tools', async () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [CLI, 'serve'],
@@ -105,14 +105,19 @@ describe('built CLI and stdio server', () => {
     client = new Client({ name: 'e2e', version: '0.0.0' });
     await client.connect(transport);
     const { tools } = await client.listTools();
-    expect(tools.map((tool) => tool.name).toSorted()).toEqual([
-      'jira_get_issue',
-      'jira_search_issues',
+    expect(
+      tools
+        .map((tool) => `${tool.name} ${tool.annotations?.readOnlyHint ? 'read' : 'write'}`)
+        .toSorted(),
+    ).toEqual([
+      'jira_create_issue write',
+      'jira_get_issue read',
+      'jira_search_issues read',
+      'jira_update_issue write',
     ]);
-    expect(tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
   });
 
-  it('enforces read-only project policy on every call', async () => {
+  it('enforces project policy on every call', async () => {
     const search = await call('jira_search_issues', { jql: 'x) OR (project = SECRET' });
     const { issues } = z
       .object({ issues: z.array(z.object({ key: z.string() })) })
@@ -123,23 +128,51 @@ describe('built CLI and stdio server', () => {
     expect(await call('jira_get_issue', { issue: 'SECRET-1' })).toMatchObject({ isError: true });
     expect(await call('jira_get_issue', { issue: 'DEMO-2' })).toMatchObject({ isError: true });
     expect(await call('jira_get_issue', { issue: '../myself' })).toMatchObject({ isError: true });
-    // There is no write tool to call: the attempt fails however the SDK reports an unknown tool.
-    const write = client.callTool({
-      name: 'jira_add_comment',
-      arguments: { issue: 'DEMO-1', body: 'hi' },
+    expect(jira.requests.filter((request) => !request.startsWith('GET '))).toEqual([
+      'POST /rest/api/3/search/jql',
+    ]);
+  });
+
+  it('creates issues and changes only the ones the user created, and deletes nothing', async () => {
+    const before = jira.requests.length;
+    const created = await call('jira_create_issue', {
+      project: 'DEMO',
+      issueType: 'Task',
+      summary: 'From an agent',
     });
+    expect(created).toMatchObject({ isError: false, text: expect.stringContaining('DEMO-100') });
     expect(
-      await write.then(
+      await call('jira_create_issue', { project: 'SECRET', issueType: 'Task', summary: 'x' }),
+    ).toMatchObject({ isError: true });
+
+    const update = { summary: 'Renamed', status: 'Done', comment: 'Done.' };
+    expect(await call('jira_update_issue', { issue: 'DEMO-1', ...update })).toMatchObject({
+      isError: false,
+    });
+    expect(await call('jira_update_issue', { issue: 'DEMO-7', ...update })).toMatchObject({
+      isError: true,
+      text: expect.stringMatching(/someone else created it/),
+    });
+    expect(await call('jira_update_issue', { issue: 'SECRET-1', ...update })).toMatchObject({
+      isError: true,
+    });
+
+    // There is no delete tool: the attempt fails however the SDK reports an unknown tool.
+    const deletion = client.callTool({ name: 'jira_delete_issue', arguments: { issue: 'DEMO-1' } });
+    expect(
+      await deletion.then(
         (result) => result.isError === true,
         () => true,
       ),
     ).toBe(true);
-    expect(
-      jira.requests.filter(
-        (request) =>
-          !request.startsWith('GET ') && !request.startsWith('POST /rest/api/3/search/jql'),
-      ),
-    ).toEqual([]);
+
+    // Every request that isn't a read, on purpose. Never a DELETE.
+    expect(jira.requests.slice(before).filter((request) => !request.startsWith('GET '))).toEqual([
+      'POST /rest/api/3/issue',
+      'PUT /rest/api/3/issue/20001',
+      'POST /rest/api/3/issue/20001/transitions',
+      'POST /rest/api/3/issue/20001/comment',
+    ]);
   });
 
   it('offers field selection over stdio and answers with references and requested fields', async () => {
