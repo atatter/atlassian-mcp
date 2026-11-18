@@ -1,6 +1,6 @@
 # atlassian-mcp
 
-A local MCP server and CLI that gives agents read-only, per-project access to Jira Cloud. [README.md](README.md) is the user guide.
+A local MCP server and CLI that gives agents per-project access to Jira Cloud. [README.md](README.md) is the user guide.
 
 ## A note from Aleks
 
@@ -15,22 +15,22 @@ Security is the product here, so these are never traded for a shorter diff.
 1. **Deny by default, checked on every call.** Policy is decided from the project ID Jira returns for the resource, never from model input such as an issue key prefix or JQL, and never from tool hiding or annotations. Search results are filtered after the query.
 2. **The token never leaves the keychain except into the Authorization header.** Not in settings, arguments, logs, errors, tool results or fixtures. Errors that might carry upstream text go through `redact`.
 3. **Only the human changes policy, through the CLI.** No MCP tool reads or writes settings.
-4. **Read-only, and a wrapper.** The tools are `jira_search_issues` and `jira_get_issue`. They only read Jira, and they expose what Jira's APIs provide rather than reconstructing data Jira doesn't offer. Write tools or new kinds of data are a scope change for the maintainer to approve first.
+4. **Reads, creates, and updates to issues the user created.** The tools expose what Jira's APIs provide. They never delete. Additional write tools or new kinds of data require the maintainer's approval.
 5. **Everything in the repo is public.** Synthetic test data only. No real sites, emails, tokens, transcripts, local paths or notes. `pnpm scan:secrets` catches the common mistakes, not all of them.
 
 ## Where code lives
 
 - `src/config.ts`, `src/policy.ts`, `src/credentials.ts`: settings, the permission check, keychain and redaction. Product-neutral.
-- `src/jira/`: Jira Cloud REST and response validation (`client.ts`), the tools (`tools.ts`, `fields.ts`, `adf.ts`) and their MCP registration (`register.ts`).
+- `src/jira/`: Jira Cloud REST and response validation (`client.ts`), the shared allow check (`access.ts`), the read tools (`tools.ts`, `fields.ts`, `adf.ts`), the write tools (`write.ts`), Markdown to ADF conversion (`markdown.ts`), and MCP registration (`register.ts`).
 - `src/cli.ts`, `src/setup.ts`, `src/prompt.ts`: the terminal experience. `src/server.ts`: the stdio server.
 - `pnpm lint` keeps these apart: the product-neutral files import no Jira, terminal or server code; `src/jira/` never imports the terminal or the server entry; and `src/server.ts` never imports terminal code, since its stdout carries MCP messages.
 - Complexity belongs at the boundary. Jira responses are checked with zod in `client.ts`, so the tools work with typed data and never re-check its shape.
 
 ## Changing a tool
 
-- Load the resource, then call `allows` with the project ID Jira returned before anything reaches the output, as `fetchAllowedIssue` in `src/jira/tools.ts` does. A missing issue and a denied one answer the same way.
-- Keep `readOnlyHint: true` in `register.ts`. Output passes through redaction there; redact before truncating, since a cut can hide a token.
-- Test with `test/fake-jira.ts`, including an issue in the denied project. `test/e2e.test.ts` asserts that Jira only receives GETs and `POST /rest/api/3/search/jql`, so a new endpoint has to be added there on purpose.
+- Load the resource, then call `allows` with the project ID Jira returned before anything reaches the output, as `fetchAllowedIssue` in `src/jira/access.ts` does. A missing issue and a denied one answer the same way.
+- Set `readOnlyHint: true` for read tools and `readOnlyHint: false` for write tools in `register.ts`. Keep `destructiveHint: true` on update. Redact output before truncating it, since a cut can hide a token.
+- Test with `test/fake-jira.ts`, including an issue in the denied project. `test/e2e.test.ts` asserts the exact non-GET requests Jira receives for search, create, edit, transition, and comment. Add new endpoints there on purpose. Never send a DELETE.
 
 ## Code style
 

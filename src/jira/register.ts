@@ -1,9 +1,12 @@
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 import { redact } from '../credentials.ts';
-import { GetIssueInput, getIssue, type JiraContext, SearchInput, searchIssues } from './tools.ts';
+import type { JiraContext } from './access.ts';
+import { GetIssueInput, getIssue, SearchInput, searchIssues } from './tools.ts';
+import { CreateIssueInput, createIssue, UpdateIssueInput, updateIssue } from './write.ts';
 
 /**
  * Registers the Jira tools. Policy is enforced inside every call; annotations are only hints.
+ * There is deliberately no tool that deletes anything.
  * Results are redacted as complete text, since rich text joined from fragments can form a token.
  */
 export function registerJiraTools(server: McpServer, context: () => Promise<JiraContext>) {
@@ -49,5 +52,32 @@ export function registerJiraTools(server: McpServer, context: () => Promise<Jira
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     (input) => run((jira) => getIssue(jira, input)),
+  );
+
+  server.registerTool(
+    'jira_create_issue',
+    {
+      title: 'Create a Jira issue',
+      description:
+        'Create an issue in a Jira project the user allowed. description is Markdown. Returns the new key ' +
+        'and link. Set the status afterwards with jira_update_issue.',
+      inputSchema: CreateIssueInput,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    (input) => run((jira) => createIssue(jira, input)),
+  );
+
+  server.registerTool(
+    'jira_update_issue',
+    {
+      title: 'Update a Jira issue you created',
+      description:
+        'Change an issue the user created: summary, description, labels, priority, assignee, status, ' +
+        'or add a comment. Given fields replace the current values; description and comment are ' +
+        "Markdown. Issues created by other people can't be changed.",
+      inputSchema: UpdateIssueInput,
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    (input) => run((jira) => updateIssue(jira, input)),
   );
 }

@@ -14,13 +14,20 @@ import { redact, tokenEntry } from './credentials.ts';
 import { clientFor } from './jira/client.ts';
 import { createPrompter, type Prompter } from './prompt.ts';
 import { serve } from './server.ts';
-import { clientConfig, describeConfig, findProject, replaceToken, setup } from './setup.ts';
+import {
+  clientConfig,
+  describeConfig,
+  findProject,
+  GRANT_ACCESS,
+  replaceToken,
+  setup,
+} from './setup.ts';
 
 const USAGE = `Usage: atlassian-mcp <command>
 
   setup                   Connect to Jira Cloud and allow a first project
   status                  Show the setup and check the connection
-  allow <KEY>             Allow reading a project
+  allow <KEY>             Allow a project: read, create, update your own issues
   deny <KEY>              Remove a project's access
   token                   Replace the stored API token
   client-config           Print the MCP client configuration
@@ -82,7 +89,7 @@ async function allow(config: Config, key: string): Promise<void> {
     ...latest,
     projects: [...latest.projects.filter((p) => p.id !== project.id), grant],
   }));
-  print(`${project.key} (${project.name}): read`);
+  print(`${project.key} (${project.name}): ${GRANT_ACCESS}`);
 }
 
 async function deny(config: Config, key: string): Promise<void> {

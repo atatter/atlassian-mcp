@@ -1,15 +1,15 @@
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Config, ProjectGrant } from '../src/config.ts';
+import type { JiraContext } from '../src/jira/access.ts';
 import { createJiraClient } from '../src/jira/client.ts';
 import { registerJiraTools } from '../src/jira/register.ts';
-import type { JiraContext } from '../src/jira/tools.ts';
 import { createFakeJira, FAKE_EMAIL, FAKE_TOKEN } from './fake-jira.ts';
 
 // Shared setup for tool tests: a fake Jira, a synthetic config and an in-memory MCP connection.
 
-/** Read access to the synthetic DEMO project. */
-export const DEMO_READ: ProjectGrant = { id: '10000', key: 'DEMO' };
+/** Access to the synthetic DEMO project. */
+export const DEMO_GRANT: ProjectGrant = { id: '10000', key: 'DEMO' };
 
 export function setup(projects: ProjectGrant[]) {
   const jira = createFakeJira();
